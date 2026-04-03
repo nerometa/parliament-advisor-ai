@@ -23,12 +23,22 @@ class GeminiSession:
     async def connect(self):
         """Open a live connection to the Gemini model."""
         logger.info("Connecting to Gemini Live (%s)...", config.GEMINI_MODEL)
+
+        system_text = config.load_system_prompt()
+        knowledge_text = config.load_knowledge()
+
+        if knowledge_text:
+            system_text += "\n\n---\n\nฐานข้อมูลอ้างอิงจากไฟล์:\n\n" + knowledge_text
+
+        logger.info("System instruction: %d chars (prompt + knowledge)",
+                     len(system_text))
+
         self._ctx = self._client.aio.live.connect(
             model=config.GEMINI_MODEL,
             config=types.LiveConnectConfig(
                 response_modalities=["TEXT"],
                 system_instruction=types.Content(
-                    parts=[types.Part(text=config.load_system_prompt())]
+                    parts=[types.Part(text=system_text)]
                 ),
             ),
         )
@@ -68,7 +78,6 @@ class GeminiSession:
             logger.info("Closing Gemini Live session.")
             await self._ctx.__aexit__(None, None, None)
             self._session = None
-            self._ctx = None
             self._ctx = None
 
 
