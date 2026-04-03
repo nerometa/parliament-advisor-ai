@@ -22,6 +22,7 @@ venv/
 
 # Agent tooling
 .sisyphus/
+.agents/
 
 # OS
 .DS_Store
