@@ -19,6 +19,7 @@ class GeminiSession:
         self._client = genai.Client(api_key=config.GEMINI_API_KEY)
         self._session = None
         self._ctx = None
+        self._closed = False
 
     async def connect(self):
         """Open a live connection to the Gemini model."""
@@ -28,7 +29,7 @@ class GeminiSession:
         knowledge_text = config.load_knowledge()
 
         if knowledge_text:
-            system_text += "\n\n---\n\nฐานข้อมูลอ้างอิงจากไฟล์:\n\n" + knowledge_text
+            system_text = "\n\n---\n\nฐานข้อมูลอ้างอิงจากไฟล์:\n\n".join([system_text, knowledge_text])
 
         logger.info("System instruction: %d chars (prompt + knowledge)",
                      len(system_text))
@@ -74,6 +75,9 @@ class GeminiSession:
 
     async def close(self):
         """Close the Gemini Live session."""
+        if self._closed:
+            return
+        self._closed = True
         if self._ctx:
             logger.info("Closing Gemini Live session.")
             await self._ctx.__aexit__(None, None, None)
@@ -90,13 +94,22 @@ async def capture_mic() -> AsyncGenerator[bytes, None]:
     import sounddevice as sd  # lazy — requires libportaudio2 system library
 
     loop = asyncio.get_running_loop()
-    queue: asyncio.Queue[bytes] = asyncio.Queue()
+    queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=100)  # Bounded for backpressure
     stream = None
 
     def _callback(indata, frames, time_info, status):
         if status:
             logger.warning("Mic callback status: %s", status)
-        loop.call_soon_threadsafe(queue.put_nowait, bytes(indata))
+        # Drop oldest chunk if queue full (backpressure)
+        try:
+            loop.call_soon_threadsafe(queue.put_nowait, bytes(indata))
+        except asyncio.QueueFull:
+            try:
+                loop.call_soon_threadsafe(queue.get_nowait)
+                loop.call_soon_threadsafe(queue.put_nowait, bytes(indata))
+                logger.debug("Dropped oldest audio chunk due to backlog")
+            except (asyncio.QueueEmpty, asyncio.QueueFull):
+                pass
 
     try:
         stream = sd.InputStream(
@@ -114,6 +127,7 @@ async def capture_mic() -> AsyncGenerator[bytes, None]:
             yield chunk
     except asyncio.CancelledError:
         logger.info("Mic capture cancelled.")
+        raise
     finally:
         if stream:
             stream.stop()
@@ -145,6 +159,16 @@ async def capture_livestream(url: str) -> AsyncGenerator[bytes, None]:
         stderr=asyncio.subprocess.PIPE,
     )
 
+    # Background task to drain stderr and prevent 64KB buffer deadlock
+    async def drain_stderr():
+        while True:
+            line = await process.stderr.readline()
+            if not line:
+                break
+            logger.debug("ffmpeg: %s", line.decode().strip())
+
+    stderr_task = asyncio.create_task(drain_stderr())
+
     try:
         while True:
             chunk = await process.stdout.read(config.AUDIO_CHUNK_BYTES)
@@ -154,11 +178,23 @@ async def capture_livestream(url: str) -> AsyncGenerator[bytes, None]:
             yield chunk
     except asyncio.CancelledError:
         logger.info("Livestream capture cancelled.")
+        raise
     finally:
+        stderr_task.cancel()
+        try:
+            await stderr_task
+        except asyncio.CancelledError:
+            pass
         if process.returncode is None:
             process.terminate()
             try:
                 await asyncio.wait_for(process.wait(), timeout=5.0)
             except asyncio.TimeoutError:
+                logger.warning("FFmpeg didn't terminate gracefully, killing")
                 process.kill()
+                await process.wait()
+            # Log any remaining stderr for debugging
+            stderr = await process.stderr.read()
+            if stderr:
+                logger.debug("FFmpeg stderr: %s", stderr.decode()[:500])
         logger.info("ffmpeg process cleaned up.")

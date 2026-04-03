@@ -61,7 +61,7 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-def handle_alert(text: str, dry_run: bool):
+async def handle_alert(text: str, dry_run: bool):
     text = text.strip()
     if not text:
         return
@@ -77,7 +77,7 @@ def handle_alert(text: str, dry_run: bool):
         if dry_run:
             logger.info("[DRY RUN] Alert would be sent to Google Chat.")
         else:
-            success = push.send_alert(text)
+            success = await push.send_alert(text)
             if success:
                 logger.info("Alert pushed to Google Chat.")
             else:
@@ -168,7 +168,7 @@ async def _receive_text_loop(session, dry_run: bool, shutdown_event: asyncio.Eve
             async for text in session.receive_text():
                 if shutdown_event.is_set():
                     break
-                handle_alert(text, dry_run)
+                await handle_alert(text, dry_run)
         except Exception as exc:
             logger.error("Receive error: %s", exc)
             raise

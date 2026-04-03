@@ -23,7 +23,7 @@ KNOWLEDGE_DIR = os.getenv("KNOWLEDGE_DIR", "knowledge")
 AUDIO_SAMPLE_RATE = 16000
 AUDIO_CHANNELS = 1
 AUDIO_BLOCK_SIZE = 1024
-AUDIO_CHUNK_BYTES = 2048  # for livestream ffmpeg reads
+AUDIO_CHUNK_BYTES = 6400  # ~200ms chunks at 16kHz mono 16-bit
 
 WEBHOOK_MAX_RETRIES = 3
 WEBHOOK_RETRY_DELAY = 1.0  # seconds, doubles on each retry
