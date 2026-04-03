@@ -35,10 +35,16 @@ Mic or Livestream → core.py (audio capture) → Gemini Live API (analysis)
 
 ## Prerequisites
 
-- Python 3.10+
-- Gemini API key ([ai.google.dev](https://ai.google.dev)) — free tier sufficient for testing
-- FFmpeg (`sudo apt install ffmpeg`) — for livestream mode
-- PortAudio (`sudo apt install libportaudio2`) — for mic mode
+- **Python 3.10+** — [Download here](https://www.python.org/downloads/) (works on Windows, macOS, and Linux)
+- **Gemini API key** ([ai.google.dev](https://ai.google.dev)) — free tier sufficient for testing
+- **FFmpeg** — for livestream mode
+  - **Windows**: Download from [ffmpeg.org](https://ffmpeg.org/download.html) or use `winget install ffmpeg`
+  - **macOS**: `brew install ffmpeg`
+  - **Linux**: `sudo apt install ffmpeg`
+- **PortAudio** — for mic mode
+  - **Windows**: Usually included with `sounddevice` pip package
+  - **macOS**: `brew install portaudio`
+  - **Linux**: `sudo apt install libportaudio2`
 
 ### Google Chat Space (optional for testing)
 
@@ -50,16 +56,63 @@ Mic or Livestream → core.py (audio capture) → Gemini Live API (analysis)
 
 ## Installation
 
+### Step 1: Get the code
+
+**macOS/Linux:**
 ```bash
 git clone git@github.com:nerometa/parliament-advisor-ai.git
 cd parliament-advisor-ai
+```
+
+**Windows (Command Prompt):**
+```cmd
+git clone https://github.com/nerometa/parliament-advisor-ai.git
+cd parliament-advisor-ai
+```
+
+### Step 2: Create a virtual environment
+
+This keeps project dependencies separate from your other Python projects.
+
+**macOS/Linux:**
+```bash
 python -m venv venv
-source venv/bin/activate        # Windows: venv\Scripts\activate
+source venv/bin/activate
+```
+
+**Windows (Command Prompt):**
+```cmd
+python -m venv venv
+venv\Scripts\activate
+```
+
+**Windows (PowerShell):**
+```powershell
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+```
+
+*Note: On Windows, if you get an execution policy error in PowerShell, use Command Prompt instead, or run: `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser`*
+
+### Step 3: Install Python packages
+
+```bash
 pip install -r requirements.txt
 ```
 
-### System dependencies (once per machine)
+### System dependencies (install once per computer)
 
+**macOS (using Homebrew):**
+```bash
+brew install ffmpeg portaudio
+```
+
+**Windows:**
+- Download FFmpeg from [ffmpeg.org](https://ffmpeg.org/download.html#build-windows)
+- Extract and add `bin` folder to your PATH, or install via: `winget install ffmpeg`
+- PortAudio is usually included automatically
+
+**Ubuntu/Debian Linux:**
 ```bash
 sudo apt update && sudo apt install -y libportaudio2 ffmpeg
 ```
@@ -88,31 +141,118 @@ KNOWLEDGE_DIR=knowledge
 
 ## Usage
 
-### Dry run (no webhook, terminal output only)
+### Understanding the modes
 
+This program works like a smart listening assistant. You can tell it to listen to either:
+- **Your microphone** — for analyzing live conversations or recordings
+- **A YouTube/stream URL** — for analyzing live parliamentary broadcasts
+
+It then sends the audio to Google's Gemini AI, which checks if anything said might break parliamentary rules.
+
+---
+
+### Method 1: Test without alerts (recommended for first-timers)
+
+Use this to make sure everything works before connecting to Google Chat.
+
+#### Option A: Listen to your microphone
+
+**What this does:** Records your voice and analyzes it in real-time.
+
+**macOS/Linux:**
 ```bash
-# Microphone mode
 python main.py --mode mic --dry-run
+```
 
-# Livestream mode
+**Windows:**
+```cmd
+python main.py --mode mic --dry-run
+```
+
+**To stop:** Press `Ctrl+C` (or `Cmd+C` on Mac)
+
+---
+
+#### Option B: Listen to a YouTube livestream
+
+**What this does:** Takes audio from a YouTube video/stream and analyzes it.
+
+**macOS/Linux:**
+```bash
 python main.py --mode livestream --url "https://www.youtube.com/watch?v=..." --dry-run
 ```
 
-### With Google Chat alerts
+**Windows:**
+```cmd
+python main.py --mode livestream --url "https://www.youtube.com/watch?v=..." --dry-run
+```
 
+**To stop:** Press `Ctrl+C`
+
+**Tip:** You'll see output in your terminal like:
+```
+Listening... Speak now or play your audio.
+[INFO] Audio chunk sent
+```
+
+If Gemini detects a potential rule violation, you'll see:
+```
+🔴 AT_RISK — 10:43:12
+สถานะ: AT_RISK
+ข้อบังคับที่เกี่ยวข้อง: ...
+```
+
+---
+
+### Method 2: Send alerts to Google Chat
+
+Once you've tested with `--dry-run` and everything works:
+
+**macOS/Linux:**
 ```bash
+# Microphone mode
 python main.py --mode mic
+
+# Livestream mode  
 python main.py --mode livestream --url "https://www.youtube.com/watch?v=..."
 ```
 
-### Options
+**Windows:**
+```cmd
+:: Microphone mode
+python main.py --mode mic
 
-| Flag | Description |
-|---|---|
-| `--mode mic\|livestream` | Audio source (required) |
-| `--url URL` | Livestream URL (required for livestream mode) |
-| `--dry-run` | Print alerts to stdout instead of sending to Google Chat |
-| `--verbose, -v` | Enable debug-level logging |
+:: Livestream mode
+python main.py --mode livestream --url "https://www.youtube.com/watch?v=..."
+```
+
+Now when Gemini detects a rule violation, it will send a message to your Google Chat Space instantly.
+
+---
+
+### Quick reference: all command options
+
+| Flag | What it does | Required? |
+|---|---|---|
+| `--mode mic` or `--mode livestream` | Choose audio source | **Yes** |
+| `--url "URL"` | Paste a YouTube/stream link | Only for livestream mode |
+| `--dry-run` | Show alerts in terminal only (no Google Chat) | No |
+| `--verbose` or `-v` | Show extra debug info | No |
+
+---
+
+### Example commands
+
+```bash
+# Test microphone with extra details shown
+python main.py --mode mic --dry-run --verbose
+
+# Monitor a Thai parliamentary livestream
+python main.py --mode livestream --url "https://www.youtube.com/watch?v=EXAMPLE" --dry-run
+
+# Live monitoring with Google Chat alerts
+python main.py --mode mic
+```
 
 ---
 
@@ -156,9 +296,23 @@ Example in Google Chat:
 
 **WebSocket 1011 error**: Your API key may not have access to Gemini 3.1 Flash Live in this region/server environment. Test on your local machine with your own key.
 
-**PortAudio not found**: Run `sudo apt install libportaudio2`
+**PortAudio not found / `ImportError: No module named '_portaudio'`**
+- **Windows**: Usually fixed by `pip install sounddevice` (PortAudio is bundled)
+- **macOS**: `brew install portaudio` then `pip install --force-reinstall sounddevice`
+- **Linux**: `sudo apt install libportaudio2`
 
-**FFmpeg not found**: Run `sudo apt install ffmpeg`
+**FFmpeg not found**
+- **Windows**: Install via `winget install ffmpeg` or download from [ffmpeg.org](https://ffmpeg.org/download.html)
+- **macOS**: `brew install ffmpeg`
+- **Linux**: `sudo apt install ffmpeg`
+
+**"'python' is not recognized" (Windows)**
+- Use `py` instead of `python`, or use the full path to your Python installation
+- Make sure you checked "Add Python to PATH" during installation
+
+**Virtual environment won't activate (Windows)**
+- Try Command Prompt instead of PowerShell
+- Or run: `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser` in PowerShell (as Administrator)
 
 **No audio chunks sent**: Check your microphone permissions and that `sounddevice` can list devices with `python -c "import sounddevice; print(sounddevice.query_devices())"`
 
