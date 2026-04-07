@@ -65,22 +65,29 @@ class GeminiSession:
         logger.info("Connecting to Gemini Live (%s)...", config.GEMINI_MODEL)
 
         system_text = config.load_system_prompt()
-        
-        # Minimal system prompt - RAG will be used for knowledge
         logger.info("System instruction: %d chars (prompt only, no knowledge)",
                      len(system_text))
 
-        self._ctx = self._client.aio.live.connect(
-            model=config.GEMINI_MODEL,
-            config=types.LiveConnectConfig(
-                response_modalities=["TEXT"],
-                system_instruction=types.Content(
-                    parts=[types.Part(text=system_text)]
+        try:
+            self._ctx = self._client.aio.live.connect(
+                model=config.GEMINI_MODEL,
+                config=types.LiveConnectConfig(
+                    response_modalities=["TEXT"],
+                    system_instruction=system_text,
                 ),
-            ),
-        )
-        self._session = await self._ctx.__aenter__()
-        logger.info("Gemini Live connected.")
+            )
+            self._session = await self._ctx.__aenter__()
+            logger.info("Gemini Live connected.")
+        except Exception as exc:
+            error_msg = str(exc)
+            if "1011" in error_msg or "internal error" in error_msg.lower():
+                raise ConnectionError(
+                    "Gemini Live API returned internal error (1011). "
+                    "This often indicates API quota exhaustion or rate limiting. "
+                    "Please check your usage at https://ai.dev/rate-limit "
+                    f"Original error: {exc}"
+                ) from exc
+            raise
 
     async def send_audio(self, chunk: bytes):
         """Send a PCM audio chunk to the model."""
