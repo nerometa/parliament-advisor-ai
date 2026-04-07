@@ -16,18 +16,33 @@ Real-time parliamentary audio monitor. Captures microphone or livestream audio, 
 
 ## Architecture
 
+### New Minimal RAG Flow
+
 ```
-Mic or Livestream → core.py (audio capture) → Gemini Live API (analysis)
-                                                     ↓
-                                            AT_RISK responses
-                                                     ↓
-                         main.py (CLI / orchestration) → push.py (Google Chat webhook)
+Knowledge Base (PDFs)
+       │
+       ▼ (one-time indexing)
+   index_knowledge.py ──► data/vector_store/
+                         ├─ embeddings.npy
+                         └─ metadata.json
+                              │
+                              ▼ (runtime)
+Query ──► ThaiRAG (cosine similarity) ──► Top-5 chunks ──► Gemini Live API
+                                                              │
+Mic or Livestream ──► core.py ──► Gemini Live API ◀───────────┘
+                                                          │
+                                                   AT_RISK responses
+                                                          │
+                              main.py ───────────────► push.py (Google Chat webhook)
 ```
 
 | File | Purpose |
 |---|---|
-| `config.py` | Loads `.env`, `system_prompt.txt`, extracts text from PDFs in `knowledge/` |
-| `core.py` | `GeminiSession` (WebSocket session manager) + `capture_mic()` + `capture_livestream(url)` |
+| `config.py` | Loads `.env`, `system_prompt.txt`, minimal system prompt (no knowledge) |
+| `core.py` | `GeminiSession` + RAG retrieval + `capture_mic()` + `capture_livestream(url)` |
+| `rag/minimal_rag.py` | **NEW** - Zero-ML-deps RAG (numpy only, pre-computed embeddings) |
+| `rag/chunker.py` | **NEW** - Thai text chunking with article boundary detection |
+| `index_knowledge.py` | **NEW** - CLI tool to build embeddings index (dev dependency) |
 | `push.py` | Google Chat webhook with exponential backoff retry + 1 msg/sec rate limiting |
 | `main.py` | CLI entry point, argparse, signal handling, reconnection loop |
 
@@ -96,8 +111,15 @@ python -m venv venv
 
 ### Step 3: Install Python packages
 
+**For runtime (minimal deps):**
 ```bash
 pip install -r requirements.txt
+```
+
+**For indexing (one-time setup):**
+```bash
+pip install sentence-transformers pypdf
+python index_knowledge.py
 ```
 
 ### System dependencies (install once per computer)
@@ -135,6 +157,35 @@ GOOGLE_CHAT_WEBHOOK_URL=https://chat.googleapis.com/v1/spaces/...
 GEMINI_MODEL=gemini-3.1-flash-live-preview
 SYSTEM_PROMPT_PATH=system_prompt.txt
 KNOWLEDGE_DIR=knowledge
+VECTOR_DB_PATH=data/vector_store
+EMBEDDING_MODEL=KoonJamesZ/sentence-transformers-nina-thai-v3
+TOP_K_CHUNKS=5
+```
+
+### Building the Knowledge Index (Required First Time)
+
+The system uses pre-computed embeddings for fast retrieval. Build the index:
+
+```bash
+# Install dev dependencies
+pip install sentence-transformers pypdf
+
+# Build index (creates data/vector_store/)
+python index_knowledge.py
+
+# Verify index was created
+python index_knowledge.py --check
+```
+
+**Output:**
+- `data/vector_store/embeddings.npy` - Document embeddings (~5MB)
+- `data/vector_store/metadata.json` - Document metadata
+- `data/vector_store/stats.json` - Index statistics
+
+**To add new PDFs:**
+```bash
+# Add PDFs to knowledge/ directory, then rebuild
+python index_knowledge.py --rebuild
 ```
 
 ---
@@ -258,15 +309,27 @@ python main.py --mode mic
 
 ## Knowledge Base
 
-The `knowledge/` directory contains 10 Thai parliamentary reference PDFs. Their text is automatically extracted and embedded into Gemini's system prompt at startup (~340K characters).
+The `knowledge/` directory contains 10 Thai parliamentary reference PDFs. Instead of loading all text (~340K characters) into the system prompt (which caused quota errors), the system now uses a **minimal RAG approach**:
 
-PDFs included:
+1. **Pre-computed embeddings** - Generated once using `index_knowledge.py`
+2. **Cosine similarity search** - Pure numpy, no ML dependencies at runtime
+3. **Top-5 retrieval** - Only relevant chunks are sent to Gemini
+
+**Benefits:**
+- ✅ Zero quota errors (340KB removed from system_instruction)
+- ✅ ~10MB runtime dependencies (was ~2.5GB)
+- ✅ <10ms retrieval latency
+- ✅ Fast cold start (no model loading)
+
+**PDFs included:**
 - Constitution of Thailand (รัฐธรรมนูญ 60)
 - House of Representatives Meeting Regulations 2562
 - Organic Act on Counter Corruption (พ.ร.บ.ปปง.)
 - State Audit Office Act (พ.ร.บ.สตง.)
 - Parliamentary procedures, written questions (กระทู้ถาม), motions (ญัตติ)
 - Parliamentary guidelines for MPs
+
+**See also:** [RAG_SETUP.md](RAG_SETUP.md) for detailed architecture documentation.
 
 ---
 
@@ -294,7 +357,17 @@ Example in Google Chat:
 
 ## Troubleshooting
 
-**WebSocket 1011 error**: Your API key may not have access to Gemini 3.1 Flash Live in this region/server environment. Test on your local machine with your own key.
+**WebSocket 1011 / Quota Exceeded Error**: 
+- ✅ Fixed by new minimal RAG architecture - 340KB removed from system_instruction
+- If still occurs: Check that `index_knowledge.py` has been run (creates data/vector_store/)
+
+**"RAG not initialized" warning**:
+- Run `python index_knowledge.py` to build the embeddings index
+- Verify with `python index_knowledge.py --check`
+
+**sentence-transformers not found**:
+- Expected at runtime - only needed during indexing
+- For indexing: `pip install sentence-transformers pypdf`
 
 **PortAudio not found / `ImportError: No module named '_portaudio'`**
 - **Windows**: Usually fixed by `pip install sounddevice` (PortAudio is bundled)

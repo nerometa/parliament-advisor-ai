@@ -2,12 +2,13 @@
 
 import asyncio
 import logging
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
 from google import genai
 from google.genai import types
 
 import config
+from rag.minimal_rag import ThaiRAG, EmbedderInterface
 
 logger = logging.getLogger("parliament")
 
@@ -20,18 +21,53 @@ class GeminiSession:
         self._session = None
         self._ctx = None
         self._closed = False
+        self._rag = ThaiRAG()
+        self._embedder = None
+
+    async def _ensure_embedder(self):
+        """Lazy-load embedder for RAG queries."""
+        if self._embedder is None:
+            self._embedder = EmbedderInterface.from_config()
+        return self._embedder
+
+    async def retrieve_context(self, query: str, k: int = 5) -> str:
+        """Retrieve relevant context from RAG for a query."""
+        if not self._rag.is_ready():
+            logger.warning("RAG not ready - run index_knowledge.py first")
+            return ""
+
+        try:
+            embedder = await self._ensure_embedder()
+            query_embedding = embedder.embed(query)
+            results = self._rag.search(query_embedding, k=k)
+
+            if not results:
+                return ""
+
+            context_parts = []
+            for r in results:
+                source = r["metadata"].get("source", "Unknown")
+                article = r["metadata"].get("article")
+                text = r["text"]
+
+                if article:
+                    context_parts.append(f"[From {source}, Article {article}]: {text}")
+                else:
+                    context_parts.append(f"[From {source}]: {text}")
+
+            return "\n\n".join(context_parts)
+        except Exception as e:
+            logger.error(f"RAG retrieval failed: {e}")
+            return ""
 
     async def connect(self):
         """Open a live connection to the Gemini model."""
         logger.info("Connecting to Gemini Live (%s)...", config.GEMINI_MODEL)
 
         system_text = config.load_system_prompt()
-        knowledge_text = config.load_knowledge()
-
-        if knowledge_text:
-            system_text = "\n\n---\n\nฐานข้อมูลอ้างอิงจากไฟล์:\n\n".join([system_text, knowledge_text])
-
-        logger.info("System instruction: %d chars (prompt + knowledge)",
+        
+        # Minimal system prompt - RAG will be used for knowledge
+        logger.info("System instruction: %d chars (prompt only, no knowledge)",
                      len(system_text))
 
         self._ctx = self._client.aio.live.connect(

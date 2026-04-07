@@ -25,6 +25,14 @@ AUDIO_CHANNELS = 1
 AUDIO_BLOCK_SIZE = 1024
 AUDIO_CHUNK_BYTES = 6400  # ~200ms chunks at 16kHz mono 16-bit
 
+# --- RAG Configuration ---
+VECTOR_DB_PATH = os.getenv("VECTOR_DB_PATH", "data/vector_store")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "KoonJamesZ/sentence-transformers-nina-thai-v3")
+EMBEDDING_MODEL_FALLBACK = os.getenv("EMBEDDING_MODEL_FALLBACK", "intfloat/multilingual-e5-large")
+CHUNK_SIZE_TOKENS = int(os.getenv("CHUNK_SIZE_TOKENS", "512"))
+CHUNK_OVERLAP_TOKENS = int(os.getenv("CHUNK_OVERLAP_TOKENS", "50"))
+TOP_K_CHUNKS = int(os.getenv("TOP_K_CHUNKS", "5"))
+
 WEBHOOK_MAX_RETRIES = 3
 WEBHOOK_RETRY_DELAY = 1.0  # seconds, doubles on each retry
 
@@ -65,7 +73,7 @@ def load_knowledge() -> str:
                 sections.append(f"=== {pdf_file.name} ===\n{text.strip()}")
                 logger.info("Loaded knowledge: %s (%d pages)", pdf_file.name, len(reader.pages))
         except Exception as exc:
-            logger.warning("Failed to read %s: %s", pdf_file.name, exc)
+            logger.warning("Failed to read %s: %s", pdf_file, exc)
 
     if not sections:
         logger.warning("No PDF files found in %s", knowledge_path.resolve())
